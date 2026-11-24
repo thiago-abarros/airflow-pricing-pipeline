@@ -22,5 +22,5 @@ Siga a ordem abaixo para reconstruir ou revisar o projeto. As caixas marcadas in
 - [x] **T10 · Manter o histórico.** Preserve uma observação por execução e categoria. Execute `uv run pytest -q tests/test_postgres.py` no Dev Container. Concluído quando uma nova execução acrescenta observações, o reprocessamento preserva a contagem e uma falha na segunda tabela desfaz também a alteração na primeira.
 - [ ] **T11 · Entregar à disciplina.** Permita que o avaliador reproduza a atividade a partir do repositório.
   - [x] Documentar como iniciar, acessar, testar e reprocessar o pipeline.
-  - [ ] Publicar a versão final no remoto e conferir o acesso de leitura pelo avaliador.
+  - [x] Publicar a versão final no remoto e conferir o acesso de leitura. O [código da atividade](https://github.com/thiago-abarros/airflow-pricing-pipeline/tree/feature/pipeline-precos) está acessível sem login.
   - [ ] Postar o link no canal da disciplina e conferir a confirmação de envio.
