@@ -28,9 +28,11 @@ Entre como `admin` com a senha gerada pelo Airflow. Abra `precos_por_categoria` 
 
 ### Usar Make no Dev Container
 
-A imagem de desenvolvimento inclui o Make e o cliente PostgreSQL. Para atualizar um contêiner aberto, use **Dev Containers: Rebuild Container** no VS Code. No terminal integrado, `make` lista os comandos disponíveis. `make trigger`, `make sql`, `make check`, `make test` e `make notebook` funcionam tanto no terminal integrado quanto no terminal da máquina.
+A imagem de desenvolvimento inclui o Make e o cliente PostgreSQL. Para atualizar um contêiner aberto, use **Dev Containers: Rebuild Container** no VS Code. No terminal integrado, `make` lista os comandos disponíveis. `make trigger`, `make sql`, `make check`, `make test`, `make notebook`, `make status` e `make password` funcionam nos dois terminais.
 
-Use o terminal da máquina para `make up`, `make down`, `make status`, `make logs`, `make password` e os alvos `smoke*` e `demo-*`, que usam o Docker Compose. Dentro do Dev Container, acompanhe a execução da DAG pela interface do Airflow.
+`make status` consulta a saúde do Airflow no terminal integrado e lista os serviços do Compose no terminal da máquina. `make password` mostra a senha local do usuário `admin`, guardada no volume compartilhado após a inicialização da API.
+
+Use o terminal da máquina para `make up`, `make down`, `make logs` e os alvos `smoke*` e `demo-*`. Dentro do Dev Container, acompanhe a execução da DAG pela interface do Airflow.
 
 O Ruff vem do grupo de desenvolvimento do `uv`. Rode `make check` no terminal integrado para conferir o lockfile e analisar o código. A extensão do VS Code usa o mesmo executável em `/opt/venv/bin/ruff`.
 

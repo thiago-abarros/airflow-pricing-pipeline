@@ -54,7 +54,10 @@ services:
 
   api:
     <<: *airflow
-    command: ["airflow", "api-server"]
+    environment:
+      <<: *airflow-env
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/shared/simple_auth_manager_passwords.json
+    command: ["sh", "-ec", "umask 077 && exec airflow api-server"]
     ports: ["127.0.0.1:8080:8080"]
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8080/api/v2/version', timeout=5)"]
