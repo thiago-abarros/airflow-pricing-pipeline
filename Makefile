@@ -36,14 +36,19 @@ trigger:
 sql:
 	$(COMPOSE) exec postgres psql -U pricing -d pricing
 
+ifeq ($(PRICING_DEV_CONTAINER),1)
+check:
+	uv lock --check
+	uv run --locked ruff check .
+
+test:
+	uv run --locked pytest -q
+else
 check:
 	$(DEV) build dev
 	$(DEV) run --no-deps --rm -T dev sh -ec 'uv lock --check && uv run --locked ruff check .'
 
 test:
-ifeq ($(PRICING_DEV_CONTAINER),1)
-	uv run --locked pytest -q
-else
 	$(DEV) build init dev
 	$(DEV) run --rm -T dev uv run --locked pytest -q
 endif

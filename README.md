@@ -30,6 +30,8 @@ Entre como `admin` com a senha gerada pelo Airflow. Abra `precos_por_categoria` 
 
 A imagem de desenvolvimento já inclui o Make. Para atualizar um contêiner aberto, use **Dev Containers: Rebuild Container** no VS Code. No terminal integrado, `make` lista os comandos e `make test` roda a suíte com `uv` e o PostgreSQL da pilha. Use o terminal da máquina para os alvos que gerenciam o Docker Compose, como `make up` e `make down`.
 
+O Ruff vem do grupo de desenvolvimento do `uv`. Rode `make check` no terminal integrado para conferir o lockfile e analisar o código. A extensão do VS Code usa o mesmo executável em `/opt/venv/bin/ruff`.
+
 ## Arquitetura da DAG
 
 ```mermaid
