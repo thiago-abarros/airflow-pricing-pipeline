@@ -9,10 +9,19 @@
   "postCreateCommand": "uv sync --locked",
   "customizations": {
     "vscode": {
-      "extensions": ["ms-python.python", "ms-toolsai.jupyter", "charliermarsh.ruff"],
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "charliermarsh.ruff",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg"
+      ],
       "settings": {
         "python.defaultInterpreterPath": "/opt/venv/bin/python",
-        "ruff.path": ["/opt/venv/bin/ruff"]
+        "ruff.path": ["/opt/venv/bin/ruff"],
+        "yaml.customTags": ["!override sequence"]
       }
     }
   }
