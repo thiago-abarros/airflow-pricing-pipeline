@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Sequence
 from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
@@ -7,8 +8,13 @@ from pathlib import Path
 import pendulum
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import TaskGroup, dag, get_current_context, task
-
-from pricing_pipeline.catalogo import buscar_catalogo, calcular_metricas, listar_categorias
+from pricing_pipeline.catalogo import (
+    buscar_catalogo,
+    particionar_catalogo,
+    precos_da_categoria,
+)
+from pricing_pipeline.contratos import ResumoXCom, consolidar
+from pricing_pipeline.metricas import calcular_metricas
 from pricing_pipeline.operadores import ValidarProdutosOperator
 from pricing_pipeline.persistencia import salvar_precos
 
@@ -47,7 +53,7 @@ def pipeline():
             on_retry_callback=avisar_retry,
             on_success_callback=registrar_sucesso,
         )
-        def buscar_produtos():
+        def buscar_produtos() -> str:
             return buscar_catalogo(
                 os.environ.get("FAKESTORE_PRODUCTS_URL", "https://fakestoreapi.com/products"),
                 Path("/opt/airflow/catalogs"),
@@ -58,25 +64,31 @@ def pipeline():
 
     with TaskGroup("analise"):
         @task
-        def descobrir_categorias(caminho):
-            return listar_categorias(caminho)
+        def descobrir_categorias(caminho: str) -> list[str]:
+            return particionar_catalogo(caminho)
 
-        @task(pool="ecommerce_pool", multiple_outputs=False)
-        def resumir_categoria(caminho, categoria):
-            return calcular_metricas(caminho, categoria)
+        @task(
+            pool="ecommerce_pool",
+            multiple_outputs=False,
+            map_index_template="{{ task.op_kwargs['categoria'] }}",
+        )
+        def resumir_categoria(caminho: str, categoria: str) -> ResumoXCom:
+            return calcular_metricas(categoria, precos_da_categoria(caminho, categoria)).para_xcom()
 
         @task
-        def persistir(resumos):
+        def persistir(categorias: list[str], resumos: Sequence[ResumoXCom]) -> None:
             run = get_current_context()["dag_run"]
             referencia = pendulum.instance(run.logical_date or run.run_after).in_timezone(FUSO)
-            linhas = list(resumos)
+            # O Airflow entrega uma sequência lazy. A leitura indexada evita uma
+            # consulta XCom fora dos limites ao encerrar a iteração.
+            linhas = consolidar(categorias, (resumos[i] for i in range(len(resumos))))
             hook = PostgresHook(postgres_conn_id="pricing_postgres")
             with closing(hook.get_conn()) as conexao:
                 salvar_precos(conexao, linhas, referencia.date(), run.run_id, run.run_after)
 
         categorias = descobrir_categorias(validado)
         resumos = resumir_categoria.partial(caminho=validado).expand(categoria=categorias)
-        persistir(resumos)
+        persistir(categorias, resumos)
 
 
 pipeline()
