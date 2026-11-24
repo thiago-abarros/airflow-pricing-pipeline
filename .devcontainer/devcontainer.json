@@ -1,0 +1,16 @@
+{
+  "name": "Pipeline de preços",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "dev",
+  "runServices": ["dev", "api", "scheduler", "dag-processor"],
+  "workspaceFolder": "/workspace",
+  "remoteUser": "airflow",
+  "shutdownAction": "stopCompose",
+  "postCreateCommand": "uv sync --locked",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"],
+      "settings": {"python.defaultInterpreterPath": "/opt/venv/bin/python"}
+    }
+  }
+}

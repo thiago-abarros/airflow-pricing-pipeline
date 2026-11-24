@@ -1,0 +1,91 @@
+x-airflow: &airflow
+  image: airflow-pricing:local
+  pull_policy: never
+  environment:
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://airflow:airflow_dev@postgres/airflow
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__PARALLELISM: 4
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://api:8080/execution/
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin
+    AIRFLOW__API_AUTH__JWT_SECRET_CMD: cat /opt/airflow/shared/jwt
+    AIRFLOW__API__SECRET_KEY_CMD: cat /opt/airflow/shared/web
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: 10
+    AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: 10
+    AIRFLOW_CONN_PRICING_POSTGRES: postgresql://pricing:pricing_dev@postgres/pricing
+  volumes:
+    - ./dags:/workspace/dags:ro
+    - shared:/opt/airflow/shared
+    - catalogs:/opt/airflow/catalogs
+    - logs:/opt/airflow/logs
+  depends_on:
+    init:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-postgres.sql:/docker-entrypoint-initdb.d/01-pricing.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "airflow", "-d", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  init:
+    <<: *airflow
+    build:
+      context: .
+      target: runtime
+    command: ["sh", "/opt/airflow/init.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *airflow
+    command: ["airflow", "api-server"]
+    ports: ["127.0.0.1:8080:8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8080/api/v2/version', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 20
+
+  scheduler:
+    <<: *airflow
+    command: ["airflow", "scheduler"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  dag-processor:
+    <<: *airflow
+    command: ["airflow", "dag-processor"]
+
+  dev:
+    <<: *airflow
+    image: airflow-pricing-dev:local
+    build:
+      context: .
+      target: development
+    profiles: ["dev"]
+    volumes:
+      - .:/workspace
+      - shared:/opt/airflow/shared
+      - catalogs:/opt/airflow/catalogs
+      - logs:/opt/airflow/logs
+    command: ["sleep", "infinity"]
+
+volumes:
+  pgdata:
+  catalogs:
+  shared:
+  logs:
