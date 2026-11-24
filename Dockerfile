@@ -20,8 +20,11 @@ COPY --chown=airflow:airflow docker/init-airflow.sh /opt/airflow/init.sh
 COPY --chown=airflow:airflow docker/init-analytics.sql /opt/airflow/init-analytics.sql
 
 FROM base AS development
+ENV PRICING_DEV_CONTAINER=1
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git make \
+    && rm -rf /var/lib/apt/lists/*
 USER airflow
 RUN uv sync --locked --no-cache
 

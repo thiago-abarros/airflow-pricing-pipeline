@@ -26,6 +26,10 @@ Entre como `admin` com a senha gerada pelo Airflow. Abra `precos_por_categoria` 
 | `make notebook` | Executar a análise do snapshot e do histórico. |
 | `make down` | Encerrar os serviços e conservar os dados nos volumes. |
 
+### Usar Make no Dev Container
+
+A imagem de desenvolvimento já inclui o Make. Para atualizar um contêiner aberto, use **Dev Containers: Rebuild Container** no VS Code. No terminal integrado, `make` lista os comandos e `make test` roda a suíte com `uv` e o PostgreSQL da pilha. Use o terminal da máquina para os alvos que gerenciam o Docker Compose, como `make up` e `make down`.
+
 ## Arquitetura da DAG
 
 ```mermaid

@@ -41,8 +41,12 @@ check:
 	$(DEV) run --no-deps --rm -T dev sh -ec 'uv lock --check && uv run --locked ruff check .'
 
 test:
+ifeq ($(PRICING_DEV_CONTAINER),1)
+	uv run --locked pytest -q
+else
 	$(DEV) build init dev
 	$(DEV) run --rm -T dev uv run --locked pytest -q
+endif
 
 notebook:
 	$(DEV) build init dev
