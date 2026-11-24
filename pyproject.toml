@@ -1,0 +1,21 @@
+[project]
+name = "airflow-pricing-pipeline"
+version = "0.1.0"
+description = "Indicadores diários de preço por categoria da FakeStore API"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "apache-airflow[postgres]==3.4.0",
+    "apache-airflow-providers-postgres==7.1.1",
+    "pendulum==3.3.0",
+    "requests==2.34.2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["dags"]
