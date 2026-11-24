@@ -1,7 +1,7 @@
 x-airflow: &airflow
-  image: airflow-pricing:local
+  image: ${PRICING_IMAGE:-airflow-pricing:local}
   pull_policy: never
-  environment:
+  environment: &airflow-env
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://airflow:airflow_dev@postgres/airflow
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__PARALLELISM: 4
@@ -77,6 +77,9 @@ services:
       context: .
       target: development
     profiles: ["dev"]
+    environment:
+      <<: *airflow-env
+      PRICING_ANALYTICS_DSN: postgresql://pricing_reader:reader_dev@postgres/pricing
     volumes:
       - .:/workspace
       - shared:/opt/airflow/shared

@@ -10,3 +10,13 @@ for key in jwt web; do
 done
 airflow db migrate
 airflow pools set ecommerce_pool 2 "Categorias processadas em paralelo"
+# Aplica as permissões também a bancos criados antes do notebook.
+python - <<'PYTHON'
+import os
+from pathlib import Path
+import psycopg
+
+metadata_dsn = os.environ["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN"]
+with psycopg.connect(metadata_dsn.replace("postgresql+psycopg://", "postgresql://"), dbname="pricing") as conn:
+    conn.execute(Path("/opt/airflow/init-analytics.sql").read_text())
+PYTHON

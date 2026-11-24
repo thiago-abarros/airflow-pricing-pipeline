@@ -9,7 +9,7 @@
   "postCreateCommand": "uv sync --locked",
   "customizations": {
     "vscode": {
-      "extensions": ["ms-python.python"],
+      "extensions": ["ms-python.python", "ms-toolsai.jupyter"],
       "settings": {"python.defaultInterpreterPath": "/opt/venv/bin/python"}
     }
   }

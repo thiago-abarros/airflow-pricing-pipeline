@@ -17,6 +17,7 @@ COPY --chown=airflow:airflow pyproject.toml uv.lock .python-version ./
 RUN uv sync --locked --no-dev --no-cache
 COPY --chown=airflow:airflow dags ./dags
 COPY --chown=airflow:airflow docker/init-airflow.sh /opt/airflow/init.sh
+COPY --chown=airflow:airflow docker/init-analytics.sql /opt/airflow/init-analytics.sql
 
 FROM base AS development
 USER root
