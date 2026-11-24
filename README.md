@@ -75,6 +75,16 @@ A busca e a persistência têm limite de 90 segundos por tentativa. Se todas as 
 
 O agendamento depende do Docker e do scheduler ativos. O Compose usa um único host, e o alerta fica nos logs do Airflow. A política `catchup=False` evita gerar automaticamente todas as execuções perdidas durante uma interrupção.
 
+### Horários e logs por etapa
+
+Os processos do Airflow emitem JSON com timestamps ISO 8601 em UTC. O sufixo `Z` indica UTC. Em Recife e São Paulo, `09:00:00Z` corresponde a **06h locais**. A DAG usa `America/Sao_Paulo` para o agendamento e a data de referência do snapshot.
+
+Na interface, escolha **Local** no seletor de fuso para usar o horário do navegador. Abra **Grid → execução → tarefa → Logs** para investigar uma tentativa. As instâncias mapeadas aparecem com o nome da categoria. No terminal, `make logs` acompanha scheduler, API e processador de DAGs.
+
+Cada evento de etapa inclui `dag_id`, `run_id`, `task_id` e `try_number`. As etapas mapeadas também trazem `map_index`. Use esses campos para cruzar início, duração, conclusão, retentativas e falhas de uma execução. Os eventos de negócio registram o status HTTP da coleta, a quantidade validada, as categorias descobertas, a quantidade por categoria e a confirmação da publicação. O campo `snapshot_atualizado` informa se aquela execução atualizou o snapshot diário.
+
+Os logs de tarefa ficam no volume `logs`, agrupados por execução, tarefa e tentativa. `make smoke` verifica os eventos estruturados das cinco etapas, e `make smoke-falhas` verifica também retentativas e alertas.
+
 ## Explorar os dados no Jupyter
 
 Execute `make notebook` após uma publicação bem-sucedida. O comando gera `.artifacts/precos.ipynb` com a tabela do snapshot, o gráfico de preços por categoria e a consulta aos últimos 30 dias. O histórico aparecerá em gráfico quando a categoria escolhida tiver pelo menos duas datas de referência.

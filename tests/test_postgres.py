@@ -30,8 +30,8 @@ def test_snapshot_historico_replay_fora_de_ordem_e_rollback():
             assert conn.execute("SELECT count(*) FROM precos_historico").fetchone() == (2,)
 
         novo_instante = instante + timedelta(hours=1)
-        salvar_precos(conn, [livro], dia, "segunda", novo_instante)
-        salvar_precos(conn, [roupa], dia, "primeira", instante)
+        assert salvar_precos(conn, [livro], dia, "segunda", novo_instante)
+        assert not salvar_precos(conn, [roupa], dia, "primeira", instante)
         esperado = [("livros", 2, Decimal("15.00"))]
         assert conn.execute(consulta).fetchall() == esperado
         select_historico = "SELECT * FROM precos_historico ORDER BY run_id, categoria"

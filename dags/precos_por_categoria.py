@@ -1,4 +1,3 @@
-import logging
 import os
 from collections.abc import Sequence
 from contextlib import closing
@@ -15,23 +14,17 @@ from pricing_pipeline.catalogo import (
 )
 from pricing_pipeline.contratos import ResumoXCom, consolidar
 from pricing_pipeline.metricas import calcular_metricas
+from pricing_pipeline.observabilidade import (
+    alertar_falha,
+    avisar_retry,
+    log,
+    registrar_inicio,
+    registrar_sucesso,
+)
 from pricing_pipeline.operadores import ValidarProdutosOperator
 from pricing_pipeline.persistencia import salvar_precos
 
 FUSO = "America/Sao_Paulo"
-log = logging.getLogger(__name__)
-
-
-def avisar_retry(context):
-    log.warning("Retentativa agendada em %s, execução %s", context["ti"].task_id, context["run_id"])
-
-
-def registrar_sucesso(context):
-    log.info("Catálogo recebido para %s", context["run_id"])
-
-
-def alertar_falha(context):
-    log.error("ALERTA: falha definitiva em %s, execução %s", context["ti"].task_id, context["run_id"])
 
 
 @dag(
@@ -40,7 +33,11 @@ def alertar_falha(context):
     schedule="0 6 * * *",
     start_date=pendulum.datetime(2025, 1, 1, tz=FUSO),
     catchup=False,
-    default_args={"on_failure_callback": alertar_falha},
+    default_args={
+        "on_execute_callback": registrar_inicio,
+        "on_success_callback": registrar_sucesso,
+        "on_failure_callback": alertar_falha,
+    },
     max_active_runs=1,
     is_paused_upon_creation=False,
 )
@@ -52,7 +49,6 @@ def pipeline():
             retry_exponential_backoff=True,
             execution_timeout=timedelta(seconds=90),
             on_retry_callback=avisar_retry,
-            on_success_callback=registrar_sucesso,
         )
         def buscar_produtos() -> str:
             return buscar_catalogo(
@@ -66,7 +62,9 @@ def pipeline():
     with TaskGroup("analise"):
         @task
         def descobrir_categorias(caminho: str) -> list[str]:
-            return particionar_catalogo(caminho)
+            categorias = particionar_catalogo(caminho)
+            log.info("catalogo_particionado", quantidade_categorias=len(categorias))
+            return categorias
 
         @task(
             pool="ecommerce_pool",
@@ -74,7 +72,10 @@ def pipeline():
             map_index_template="{{ task.op_kwargs['categoria'] }}",
         )
         def resumir_categoria(caminho: str, categoria: str) -> ResumoXCom:
-            return calcular_metricas(categoria, precos_da_categoria(caminho, categoria)).para_xcom()
+            log.info("categoria_iniciada", categoria=categoria)
+            resumo = calcular_metricas(categoria, precos_da_categoria(caminho, categoria))
+            log.info("categoria_calculada", categoria=categoria, quantidade_produtos=resumo.quantidade)
+            return resumo.para_xcom()
 
         @task(
             retries=2,
@@ -85,13 +86,21 @@ def pipeline():
         )
         def persistir(categorias: list[str], resumos: Sequence[ResumoXCom]) -> None:
             run = get_current_context()["dag_run"]
-            referencia = pendulum.instance(run.logical_date or run.run_after).in_timezone(FUSO)
+            referencia = pendulum.instance(run.logical_date or run.run_after).in_timezone(FUSO).date()
             # O Airflow entrega uma sequência lazy. A leitura indexada evita uma
             # consulta XCom fora dos limites ao encerrar a iteração.
             linhas = consolidar(categorias, (resumos[i] for i in range(len(resumos))))
             hook = PostgresHook(postgres_conn_id="pricing_postgres")
             with closing(hook.get_conn()) as conexao:
-                salvar_precos(conexao, linhas, referencia.date(), run.run_id, run.run_after)
+                snapshot_atualizado = salvar_precos(conexao, linhas, referencia, run.run_id, run.run_after)
+            log.info(
+                "publicacao_confirmada",
+                data_referencia=referencia.isoformat(),
+                fuso_referencia=FUSO,
+                quantidade_categorias=len(linhas),
+                quantidade_produtos=sum(linha.quantidade for linha in linhas),
+                snapshot_atualizado=snapshot_atualizado,
+            )
 
         categorias = descobrir_categorias(validado)
         resumos = resumir_categoria.partial(caminho=validado).expand(categoria=categorias)

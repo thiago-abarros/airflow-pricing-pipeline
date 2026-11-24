@@ -64,7 +64,30 @@ aguardar_retry() {
 }
 
 confirmar_log() {
-    pilha logs --no-color scheduler | grep -F -- "$1" >/dev/null
+    pilha exec -T scheduler python - "$dag" "$@" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+dag_id, run_id, task_id, evento, *campos = sys.argv[1:]
+pasta = Path("/opt/airflow/logs") / f"dag_id={dag_id}" / f"run_id={run_id}" / f"task_id={task_id}"
+esperado = dict(campo.split("=", 1) for campo in campos)
+for arquivo in pasta.rglob("attempt=*.log"):
+    for linha in arquivo.read_text().splitlines():
+        registro = json.loads(linha)
+        if registro.get("event") == evento and all(str(registro.get(k)) == v for k, v in esperado.items()):
+            assert registro["timestamp"].endswith("Z")
+            assert datetime.fromisoformat(registro["timestamp"]).utcoffset() == timezone.utc.utcoffset(None)
+            assert (registro["dag_id"], registro["run_id"], registro["task_id"]) == (dag_id, run_id, task_id)
+            assert registro["try_number"] >= 1
+            if evento == "etapa_concluida":
+                assert registro["duracao_ms"] >= 0
+            if task_id == "analise.resumir_categoria":
+                assert registro["map_index"] >= 0
+            sys.exit(0)
+sys.exit(f"Evento não encontrado: {run_id} / {task_id} / {evento} / {esperado}")
+PY
 }
 
 publicacao() {
@@ -87,6 +110,15 @@ done
 
 airflow dags trigger "$dag" --run-id smoke-t06-t07 --logical-date "$data_logica"
 aguardar smoke-t06-t07
+confirmar_log smoke-t06-t07 ingestao.buscar_produtos catalogo_gravado status_http=200
+confirmar_log smoke-t06-t07 ingestao.validar_produtos catalogo_validado quantidade_produtos=4
+confirmar_log smoke-t06-t07 analise.descobrir_categorias catalogo_particionado quantidade_categorias=3
+confirmar_log smoke-t06-t07 analise.resumir_categoria categoria_calculada categoria=livros quantidade_produtos=2
+confirmar_log smoke-t06-t07 analise.persistir publicacao_confirmada data_referencia=2025-01-02 snapshot_atualizado=True
+for tarefa in ingestao.buscar_produtos ingestao.validar_produtos analise.descobrir_categorias analise.resumir_categoria analise.persistir; do
+    confirmar_log smoke-t06-t07 "$tarefa" etapa_iniciada
+    confirmar_log smoke-t06-t07 "$tarefa" etapa_concluida
+done
 igual "$(sql airflow "SELECT slots FROM slot_pool WHERE pool = 'ecommerce_pool'")" 2
 igual "$(sql airflow "SELECT count(DISTINCT region_index) FROM task_instance
     WHERE run_id = 'smoke-t06-t07' AND task_id = 'analise.resumir_categoria'
@@ -140,15 +172,15 @@ pilha start catalogo-teste
 aguardar smoke-api-transitoria
 igual "$(sql airflow "SELECT max(try_number) FROM task_instance
     WHERE run_id = 'smoke-api-transitoria' AND task_id = 'ingestao.buscar_produtos' AND state = 'success'")" 2
-confirmar_log 'Retentativa agendada em ingestao.buscar_produtos, execução smoke-api-transitoria'
-confirmar_log 'Catálogo recebido para smoke-api-transitoria'
+confirmar_log smoke-api-transitoria ingestao.buscar_produtos etapa_retentativa
+confirmar_log smoke-api-transitoria ingestao.buscar_produtos etapa_concluida try_number=2
 printf 'API recuperada automaticamente na segunda tentativa.\n'
 
 publicado=$(consulta_dia)
 pilha exec -T catalogo-teste cp /amostras/invalido.json /tmp/products
 airflow dags trigger "$dag" --run-id smoke-catalogo-invalido --logical-date 2025-01-04T10:00:00+00:00
 aguardar smoke-catalogo-invalido failed
-confirmar_log 'ALERTA: falha definitiva em ingestao.validar_produtos, execução smoke-catalogo-invalido'
+confirmar_log smoke-catalogo-invalido ingestao.validar_produtos etapa_falhou alerta=falha_definitiva
 igual "$(consulta_dia)" "$publicado"
 printf 'Catálogo inválido rejeitado, com alerta e dados preservados.\n'
 
@@ -161,7 +193,7 @@ aguardar_retry smoke-db-transitorio analise.persistir
 igual "$(consulta_dia)" "$publicado"
 sql pricing "ALTER TABLE precos_historico DROP CONSTRAINT smoke_bloquear_historico"
 aguardar smoke-db-transitorio
-confirmar_log 'Retentativa agendada em analise.persistir, execução smoke-db-transitorio'
+confirmar_log smoke-db-transitorio analise.persistir etapa_retentativa
 igual "$(sql pricing "SELECT count(*) FROM precos_diarios WHERE data_referencia = '2025-01-04'")" 3
 igual "$(sql pricing "SELECT count(*) FROM precos_historico WHERE run_id = 'smoke-db-transitorio'")" 3
 printf 'Falha na escrita do histórico desfez o snapshot, e o Airflow publicou na retentativa.\n'
@@ -172,6 +204,6 @@ airflow dags trigger "$dag" --run-id smoke-api-fora --logical-date 2025-01-04T12
 aguardar smoke-api-fora failed 270
 igual "$(sql airflow "SELECT count(*) FROM task_instance
     WHERE run_id = 'smoke-api-fora' AND task_id = 'ingestao.buscar_produtos' AND state = 'failed'")" 4
-confirmar_log 'ALERTA: falha definitiva em ingestao.buscar_produtos, execução smoke-api-fora'
+confirmar_log smoke-api-fora ingestao.buscar_produtos etapa_falhou alerta=falha_definitiva try_number=4
 igual "$(consulta_dia)" "$publicado"
 printf 'API indisponível nas quatro tentativas. Alerta emitido e publicação anterior preservada.\n'

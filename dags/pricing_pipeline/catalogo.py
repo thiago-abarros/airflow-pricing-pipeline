@@ -1,17 +1,18 @@
 """Coleta, armazenamento e particionamento do catálogo."""
 
 import json
-import logging
 import os
 from collections import defaultdict
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import perf_counter
 
 import requests
 
 from pricing_pipeline.contratos import Produto
+from pricing_pipeline.observabilidade import log
 
 
 def gravar_atomico(destino: Path, conteudo: bytes) -> None:
@@ -28,6 +29,7 @@ def gravar_atomico(destino: Path, conteudo: bytes) -> None:
 
 
 def buscar_catalogo(url: str, diretorio: Path, run_id: str) -> str:
+    inicio = perf_counter()
     try:
         resposta = requests.get(url, timeout=(5, 30))
         resposta.raise_for_status()
@@ -36,9 +38,20 @@ def buscar_catalogo(url: str, diretorio: Path, run_id: str) -> str:
         subdiretorio = diretorio / sha256(run_id.encode()).hexdigest()
         destino = subdiretorio / sha256(resposta.content).hexdigest() / "catalogo.json"
         gravar_atomico(destino, resposta.content)
-    except (requests.RequestException, ValueError, OSError):
-        logging.exception("Falha ao buscar ou gravar o catálogo da execução %s", run_id)
+    except (requests.RequestException, ValueError, OSError) as erro:
+        resposta_com_erro = getattr(erro, "response", None)
+        log.error(
+            "catalogo_falhou",
+            tipo_erro=type(erro).__name__,
+            status_http=resposta_com_erro.status_code if resposta_com_erro is not None else None,
+        )
         raise
+    log.info(
+        "catalogo_gravado",
+        status_http=resposta.status_code,
+        tamanho_bytes=len(resposta.content),
+        duracao_ms=round((perf_counter() - inicio) * 1000),
+    )
     return str(destino)
 
 

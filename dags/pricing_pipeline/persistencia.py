@@ -14,8 +14,8 @@ def salvar_precos(
     dia: date,
     run_id: str,
     instante: datetime,
-) -> None:
-    """Atualiza o histórico da execução e publica o snapshot se ela for a mais recente do dia."""
+) -> bool:
+    """Publica o histórico e informa se o snapshot também foi atualizado."""
     if not resumos:
         raise ValueError("Nenhuma categoria para persistir")
 
@@ -31,7 +31,8 @@ def salvar_precos(
             (dia,),
         )
         mais_recente = cursor.fetchone()
-        if mais_recente is None or (instante, run_id) >= mais_recente:
+        snapshot_atualizado = mais_recente is None or (instante, run_id) >= mais_recente
+        if snapshot_atualizado:
             cursor.execute("DELETE FROM precos_diarios WHERE data_referencia = %s", (dia,))
             cursor.executemany(
                 """INSERT INTO precos_diarios
@@ -50,3 +51,4 @@ def salvar_precos(
                        %(preco_medio)s, %(preco_minimo)s, %(preco_maximo)s)""",
             linhas,
         )
+    return snapshot_atualizado

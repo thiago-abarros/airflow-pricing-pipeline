@@ -9,6 +9,7 @@ dependencies = [
     "pendulum==3.3.0",
     "psycopg[binary]>=3.3,<4",
     "requests==2.34.2",
+    "structlog>=25,<27",
 ]
 
 [dependency-groups]
