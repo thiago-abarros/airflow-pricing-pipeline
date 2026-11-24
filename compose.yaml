@@ -18,7 +18,7 @@ x-airflow: &airflow
     AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: 10
     AIRFLOW_CONN_PRICING_POSTGRES: postgresql://pricing:pricing_dev@postgres/pricing
   volumes:
-    - ./dags:/workspace/dags:ro
+    - ${PRICING_BIND_ROOT:-.}/dags:/workspace/dags:ro
     - shared:/opt/airflow/shared
     - catalogs:/opt/airflow/catalogs
     - logs:/opt/airflow/logs
@@ -35,7 +35,7 @@ services:
       POSTGRES_PASSWORD: airflow_dev
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./docker/init-postgres.sql:/docker-entrypoint-initdb.d/01-pricing.sql:ro
+      - ${PRICING_BIND_ROOT:-.}/docker/init-postgres.sql:/docker-entrypoint-initdb.d/01-pricing.sql:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "airflow", "-d", "airflow"]
       interval: 5s
@@ -58,7 +58,7 @@ services:
       <<: *airflow-env
       AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/shared/simple_auth_manager_passwords.json
     command: ["sh", "-ec", "umask 077 && exec airflow api-server"]
-    ports: ["127.0.0.1:8080:8080"]
+    ports: ["127.0.0.1:${AIRFLOW_PORT:-8080}:8080"]
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8080/api/v2/version', timeout=5)"]
       interval: 10s
@@ -71,10 +71,20 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--local"]
+      interval: 10s
+      timeout: 8s
+      retries: 20
 
   dag-processor:
     <<: *airflow
     command: ["airflow", "dag-processor"]
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "DagProcessorJob", "--local"]
+      interval: 10s
+      timeout: 8s
+      retries: 20
 
   dev:
     <<: *airflow
@@ -87,7 +97,7 @@ services:
       <<: *airflow-env
       PRICING_ANALYTICS_DSN: postgresql://pricing_reader:reader_dev@postgres/pricing
     volumes:
-      - .:/workspace
+      - ${PRICING_BIND_ROOT:-.}:/workspace
       - shared:/opt/airflow/shared
       - catalogs:/opt/airflow/catalogs
       - logs:/opt/airflow/logs

@@ -1,11 +1,19 @@
 {
   "name": "Pipeline de preços",
-  "dockerComposeFile": "../compose.yaml",
+  "dockerComposeFile": ["../compose.yaml", "compose.yaml"],
   "service": "dev",
   "runServices": ["dev", "api", "scheduler", "dag-processor"],
   "workspaceFolder": "/workspace",
   "remoteUser": "airflow",
   "shutdownAction": "stopCompose",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+  "remoteEnv": {
+    "PRICING_BIND_ROOT": "${localWorkspaceFolder}"
+  },
   "postCreateCommand": "uv sync --locked",
   "customizations": {
     "vscode": {

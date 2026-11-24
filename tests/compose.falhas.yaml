@@ -5,7 +5,7 @@ services:
     pull_policy: never
     command: ["python", "-m", "http.server", "8000", "--directory", "/tmp"]
     volumes:
-      - ./tests/amostras:/amostras:ro
+      - ${PRICING_BIND_ROOT:-.}/tests/amostras:/amostras:ro
   scheduler:
     environment:
       FAKESTORE_PRODUCTS_URL: http://catalogo-teste:8000/products

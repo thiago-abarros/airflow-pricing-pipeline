@@ -4,12 +4,12 @@ set -eu
 export PRICING_IMAGE="airflow-pricing-smoke:local"
 # Uma porta dinâmica evita conflito com a pilha principal e com make demo-up.
 export AIRFLOW_DEMO_PORT=0
-projeto="pricing-smoke-$$"
+projeto="pricing-smoke-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
 dag=precos_por_categoria
 data_logica=2025-01-02T09:00:00+00:00
 
 pilha() {
-    docker compose -p "$projeto" -f compose.yaml -f tests/compose.falhas.yaml "$@"
+    sh scripts/compose.sh -p "$projeto" -f compose.yaml -f tests/compose.falhas.yaml "$@"
 }
 
 limpar() {
@@ -28,6 +28,33 @@ sql() {
 
 airflow() {
     pilha exec -T scheduler airflow "$@"
+}
+
+limpar_analise() {
+    pilha exec -T api python - "$dag" "$1" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+import requests
+
+dag_id, run_id = sys.argv[1:]
+api = "http://localhost:8080"
+senha = json.loads(Path(os.environ["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE"]).read_text())["admin"]
+with requests.Session() as sessao:
+    token = sessao.post(f"{api}/auth/token", json={"username": "admin", "password": senha}, timeout=10)
+    token.raise_for_status()
+    sessao.headers["Authorization"] = f"Bearer {token.json()['access_token']}"
+    resposta = sessao.post(
+        f"{api}/api/v2/dags/{dag_id}/clearTaskInstances",
+        json={"dag_run_id": run_id, "task_group_id": "analise", "dry_run": False, "only_failed": False},
+        timeout=30,
+    )
+    resposta.raise_for_status()
+    tarefas = {tarefa["task_id"] for tarefa in resposta.json()["task_instances"]}
+    assert tarefas == {"analise.descobrir_categorias", "analise.resumir_categoria", "analise.persistir"}, tarefas
+PY
 }
 
 igual() {
@@ -137,8 +164,7 @@ igual "$(sql pricing "SELECT quantidade, preco_medio, preco_minimo, preco_maximo
 
 original=$(publicacao)
 for repeticao in 1 2; do
-    airflow tasks clear "$dag" -s "$data_logica" -e "$data_logica" \
-        -t '^analise\.descobrir_categorias$' -d -y
+    limpar_analise smoke-t06-t07
     aguardar smoke-t06-t07
     igual "$(sql airflow "SELECT clear_number FROM dag_run WHERE run_id = 'smoke-t06-t07'")" "$repeticao"
     igual "$(publicacao)" "$original"

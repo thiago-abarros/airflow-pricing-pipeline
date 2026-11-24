@@ -1,22 +1,26 @@
-COMPOSE ?= docker compose
+COMPOSE ?= sh scripts/compose.sh
 DAG := precos_por_categoria
 DEV := $(COMPOSE) --profile dev
 DEMO := $(COMPOSE) -p pricing-falhas -f compose.yaml -f tests/compose.falhas.yaml
-HOST_TARGETS := up down logs smoke smoke-falhas demo-up demo-down demo-ready demo-invalid demo-offline demo-trigger
 AIRFLOW_PASSWORD_FILE := /opt/airflow/shared/simple_auth_manager_passwords.json
 
 .DEFAULT_GOAL := help
-.PHONY: help trigger status password sql check test notebook $(HOST_TARGETS)
+.PHONY: help trigger status password sql check test notebook up down logs smoke smoke-falhas demo-up demo-down demo-ready demo-invalid demo-offline demo-trigger
+
+help:
+	@printf '%s\n' 'make up        Sobe Airflow e PostgreSQL' 'make down      Para a pilha e mantém os volumes' \
+	  'make status    Mostra a saúde do Airflow ou os serviços do Compose' 'make logs      Acompanha os logs do Airflow' \
+	  'make password  Mostra a senha local do admin' 'make trigger   Dispara a DAG' \
+	  'make sql       Abre o PostgreSQL analítico' 'make check     Verifica lockfile e lint' \
+	  'make test      Roda pytest com PostgreSQL' 'make smoke     Valida T06 e T07 em uma pilha isolada' \
+	  'make smoke-falhas Exercita recuperação, rollback e alertas no Airflow' \
+	  'make notebook  Executa o notebook e grava o resultado em .artifacts' \
+	  'make demo-up   Sobe a pilha isolada para simular falhas' 'make demo-down Encerra a pilha de falhas' \
+	  'make demo-ready / demo-invalid / demo-offline Configura a resposta do catálogo de teste' \
+	  'make demo-trigger Dispara a DAG na pilha de demonstração'
 
 ifeq ($(PRICING_DEV_CONTAINER),1)
 NOTEBOOK_PREFIX :=
-
-help:
-	@printf '%s\n' 'make trigger   Dispara a DAG' 'make sql       Abre o PostgreSQL analítico' \
-	  'make status    Consulta a saúde do Airflow' 'make password  Mostra a senha local do admin' \
-	  'make check     Verifica lockfile e lint' 'make test      Roda pytest com PostgreSQL' \
-	  'make notebook  Executa o notebook e grava o resultado em .artifacts' \
-	  'Use o terminal da máquina para gerenciar o Compose e rodar os ensaios isolados.'
 
 trigger:
 	uv run --locked airflow dags trigger $(DAG)
@@ -42,36 +46,18 @@ check:
 test:
 	uv run --locked pytest -q
 
-$(HOST_TARGETS):
-	@printf '%s\n' 'Execute make $@ no terminal da máquina que roda o Docker Compose.' >&2
-	@exit 2
+down:
+	$(COMPOSE) stop scheduler dag-processor api postgres
 
 else
 # A execução do notebook usa o serviço de desenvolvimento em ambas as modalidades.
 NOTEBOOK_PREFIX := $(DEV) run --rm -T dev
-
-help:
-	@printf '%s\n' 'make up        Sobe Airflow e PostgreSQL' 'make down      Para os serviços e mantém os volumes' \
-	  'make status    Mostra o estado dos serviços' 'make logs      Acompanha os logs do Airflow' \
-	  'make password  Mostra a senha local do admin' 'make trigger   Dispara a DAG' \
-	  'make sql       Abre o PostgreSQL analítico' 'make check     Verifica lockfile e lint' \
-	  'make test      Roda pytest com PostgreSQL' 'make smoke     Valida T06 e T07 em uma pilha isolada' \
-	  'make smoke-falhas Exercita recuperação, rollback e alertas no Airflow' \
-	  'make notebook  Executa o notebook e grava o resultado em .artifacts' \
-	  'make demo-up   Sobe a pilha isolada para simular falhas' 'make demo-down Encerra a pilha de falhas'
-
-up:
-	$(COMPOSE) build init
-	$(COMPOSE) up -d --wait
 
 down:
 	$(DEV) down
 
 status:
 	$(DEV) ps -a
-
-logs:
-	$(COMPOSE) logs -f api scheduler dag-processor
 
 password:
 	@$(COMPOSE) exec -T api sh -ec 'cat "$${AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE:-/opt/airflow/simple_auth_manager_passwords.json.generated}"'
@@ -94,6 +80,14 @@ build-dev-stack:
 	$(DEV) build init dev
 
 notebook: build-dev-stack
+endif
+
+up:
+	$(COMPOSE) build init
+	$(COMPOSE) up -d --wait api scheduler dag-processor
+
+logs:
+	$(COMPOSE) logs -f api scheduler dag-processor
 
 smoke:
 	sh scripts/smoke.sh
@@ -119,7 +113,6 @@ demo-offline:
 
 demo-trigger:
 	$(DEMO) exec -T scheduler airflow dags trigger $(DAG)
-endif
 
 notebook:
 	mkdir -p .artifacts
