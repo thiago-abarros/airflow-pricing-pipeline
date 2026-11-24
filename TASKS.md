@@ -11,9 +11,9 @@ Siga a ordem abaixo para reconstruir ou revisar o projeto. As caixas marcadas in
 ## Etapa 2 · Pipeline obrigatório
 
 - [x] **T04 · Modelar e agendar.** Organize ingestão e análise e inicie a coleta às 06h de Brasília. Na UI, abra o grafo e confira a próxima execução no fuso de São Paulo. Concluído quando os dois grupos aparecem, a DAG está ativa e as execuções diárias seguem o cron.
-- [x] **T05 · Tornar a ingestão resiliente.** Colete o catálogo com timeout, retry exponencial e callbacks. Execute os cenários de recuperação e indisponibilidade abaixo. Concluído quando uma falha temporária se recupera e uma persistente registra o alerta depois da quarta tentativa.
+- [x] **T05 · Tornar a ingestão resiliente.** Colete o catálogo com timeout, retry exponencial e callbacks. Execute `make smoke-falhas` ou os cenários manuais abaixo. Concluído quando uma falha temporária se recupera e uma persistente registra o alerta depois da quarta tentativa.
 - [x] **T06 · Mapear as categorias.** Calcule quantidade, média, mínimo e máximo para cada categoria descoberta. Execute `make smoke`. Concluído quando as três categorias da amostra são mapeadas, o pico de concorrência fica em até dois e uma quarta categoria aparece automaticamente. Livros mantém quantidade 2, média 15,00, mínimo 10,00 e máximo 20,00.
-- [x] **T07 · Consolidar e gravar.** Publique o snapshot diário de forma atômica usando a conexão `pricing_postgres`. O `make smoke` repete o cálculo e a gravação duas vezes, comparando snapshot e histórico completos. O `make test` cobre rollback e reprocessamento de execução antiga.
+- [x] **T07 · Consolidar e gravar.** Publique o snapshot diário de forma atômica usando a conexão `pricing_postgres`. O `make smoke` repete o cálculo e a gravação duas vezes, comparando snapshot e histórico completos. O `make smoke-falhas` rejeita uma escrita no histórico para verificar o rollback do snapshot e a recuperação na retentativa. O `make test` cobre também reprocessamento de execução antiga.
 - [x] **T08 · Demonstrar os obrigatórios.** Comprove o caminho da API até o PostgreSQL. Execute `make test` e acompanhe uma execução da API real pela UI. Concluído quando a suíte passa, o grafo mostra o fan-out e o fan-in e a soma das quantidades corresponde ao catálogo da execução.
 
 ## Etapa 3 · Extras e entrega

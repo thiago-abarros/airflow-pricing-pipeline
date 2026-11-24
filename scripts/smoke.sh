@@ -38,16 +38,33 @@ igual() {
 }
 
 aguardar() {
-    for tentativa in $(seq 1 60); do
-        estado=$(sql airflow "SELECT state FROM dag_run WHERE run_id = '$1'")
+    run_id=$1
+    esperado=${2:-success}
+    for tentativa in $(seq 1 "${3:-60}"); do
+        estado=$(sql airflow "SELECT state FROM dag_run WHERE run_id = '$run_id'")
         case "$estado" in
-            success) return ;;
-            failed) printf 'Execução falhou: %s\n' "$1" >&2; return 1 ;;
+            success|failed) igual "$estado" "$esperado"; return ;;
         esac
         sleep 2
     done
-    printf 'Tempo excedido esperando %s\n' "$1" >&2
+    printf 'Tempo excedido esperando %s\n' "$run_id" >&2
     return 1
+}
+
+aguardar_retry() {
+    for tentativa in $(seq 1 60); do
+        estado=$(sql airflow "SELECT state FROM task_instance
+            WHERE run_id = '$1' AND task_id = '$2' ORDER BY try_number DESC LIMIT 1")
+        if [ "$estado" = up_for_retry ]; then return; fi
+        if [ "$(sql airflow "SELECT state FROM dag_run WHERE run_id = '$1'")" = failed ]; then break; fi
+        sleep 1
+    done
+    printf 'Retentativa não observada em %s / %s. Estado: %s\n' "$1" "$2" "$estado" >&2
+    return 1
+}
+
+confirmar_log() {
+    pilha logs --no-color scheduler | grep -F -- "$1" >/dev/null
 }
 
 publicacao() {
@@ -104,3 +121,57 @@ igual "$(sql airflow "SELECT count(DISTINCT region_index) FROM task_instance
 igual "$(sql pricing "SELECT count(*) FROM precos_diarios WHERE data_referencia = '2025-01-03'")" 4
 igual "$(sql pricing "SELECT preco_medio FROM precos_diarios WHERE data_referencia = '2025-01-03' AND categoria = 'casa'")" 4.50
 printf 'T06 e T07 passaram. Três e quatro categorias mapeadas, pico de %s e dois reprocessamentos idênticos.\n' "$pico"
+
+if [ "${1:-}" != "--falhas" ]; then
+    exit 0
+fi
+
+consulta_dia() {
+    sql pricing "SELECT json_build_array(
+        (SELECT json_agg(d ORDER BY categoria) FROM precos_diarios d WHERE data_referencia = '2025-01-04'),
+        (SELECT json_agg(h ORDER BY run_id, categoria) FROM precos_historico h WHERE data_referencia = '2025-01-04')
+    )"
+}
+
+pilha stop catalogo-teste
+airflow dags trigger "$dag" --run-id smoke-api-transitoria --logical-date 2025-01-04T09:00:00+00:00
+aguardar_retry smoke-api-transitoria ingestao.buscar_produtos
+pilha start catalogo-teste
+aguardar smoke-api-transitoria
+igual "$(sql airflow "SELECT max(try_number) FROM task_instance
+    WHERE run_id = 'smoke-api-transitoria' AND task_id = 'ingestao.buscar_produtos' AND state = 'success'")" 2
+confirmar_log 'Retentativa agendada em ingestao.buscar_produtos, execução smoke-api-transitoria'
+confirmar_log 'Catálogo recebido para smoke-api-transitoria'
+printf 'API recuperada automaticamente na segunda tentativa.\n'
+
+publicado=$(consulta_dia)
+pilha exec -T catalogo-teste cp /amostras/invalido.json /tmp/products
+airflow dags trigger "$dag" --run-id smoke-catalogo-invalido --logical-date 2025-01-04T10:00:00+00:00
+aguardar smoke-catalogo-invalido failed
+confirmar_log 'ALERTA: falha definitiva em ingestao.validar_produtos, execução smoke-catalogo-invalido'
+igual "$(consulta_dia)" "$publicado"
+printf 'Catálogo inválido rejeitado, com alerta e dados preservados.\n'
+
+# Bloqueia a última escrita para provocar rollback depois de atualizar o snapshot.
+pilha exec -T catalogo-teste cp /amostras/valido.json /tmp/products
+sql pricing "ALTER TABLE precos_historico ADD CONSTRAINT smoke_bloquear_historico
+    CHECK (run_id <> 'smoke-db-transitorio')"
+airflow dags trigger "$dag" --run-id smoke-db-transitorio --logical-date 2025-01-04T11:00:00+00:00
+aguardar_retry smoke-db-transitorio analise.persistir
+igual "$(consulta_dia)" "$publicado"
+sql pricing "ALTER TABLE precos_historico DROP CONSTRAINT smoke_bloquear_historico"
+aguardar smoke-db-transitorio
+confirmar_log 'Retentativa agendada em analise.persistir, execução smoke-db-transitorio'
+igual "$(sql pricing "SELECT count(*) FROM precos_diarios WHERE data_referencia = '2025-01-04'")" 3
+igual "$(sql pricing "SELECT count(*) FROM precos_historico WHERE run_id = 'smoke-db-transitorio'")" 3
+printf 'Falha na escrita do histórico desfez o snapshot, e o Airflow publicou na retentativa.\n'
+
+publicado=$(consulta_dia)
+pilha stop catalogo-teste
+airflow dags trigger "$dag" --run-id smoke-api-fora --logical-date 2025-01-04T12:00:00+00:00
+aguardar smoke-api-fora failed 270
+igual "$(sql airflow "SELECT count(*) FROM task_instance
+    WHERE run_id = 'smoke-api-fora' AND task_id = 'ingestao.buscar_produtos' AND state = 'failed'")" 4
+confirmar_log 'ALERTA: falha definitiva em ingestao.buscar_produtos, execução smoke-api-fora'
+igual "$(consulta_dia)" "$publicado"
+printf 'API indisponível nas quatro tentativas. Alerta emitido e publicação anterior preservada.\n'

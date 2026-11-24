@@ -22,6 +22,8 @@ def test_contrato_da_dag():
     assert "analise.descobrir_categorias" in resumo.upstream_task_ids
     persistencia = dag.get_task("analise.persistir")
     assert persistencia.upstream_task_ids == {"analise.descobrir_categorias", "analise.resumir_categoria"}
+    assert persistencia.retries == 2 and persistencia.retry_exponential_backoff
+    assert persistencia.on_retry_callback and persistencia.on_failure_callback
     assert resumo.downstream_task_ids == {"analise.persistir"}
     proxima = coerce_to_core_timetable(dag.timetable).next_dagrun_info(
         last_automated_data_interval=None,

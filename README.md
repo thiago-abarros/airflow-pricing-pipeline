@@ -22,6 +22,7 @@ Entre como `admin` com a senha gerada pelo Airflow. Abra `precos_por_categoria` 
 | `make check` | Conferir o lockfile e rodar Ruff. |
 | `make test` | Rodar a suíte com tabelas temporárias em PostgreSQL. |
 | `make smoke` | Testar T06 e T07 com catálogo controlado, scheduler real e banco isolado. |
+| `make smoke-falhas` | Exercitar recuperação da API, rejeição de catálogo, rollback no PostgreSQL e alerta após esgotar os retries. Pode levar vários minutos pelo backoff. |
 | `make notebook` | Executar a análise do snapshot e do histórico. |
 | `make down` | Encerrar os serviços e conservar os dados nos volumes. |
 
@@ -45,7 +46,7 @@ flowchart LR
 
 1. **Ingestão.** Consulta `GET /products` com timeout e grava o JSON de forma atômica no volume `catalogs`. O catálogo é identificado pela execução e pelo hash do conteúdo. O Airflow faz até três retentativas com espera exponencial. Os callbacks registram sucesso, retentativa e falha definitiva.
 2. **T06 · Fan-out.** `ValidarProdutosOperator` verifica o catálogo. A descoberta agrupa os preços em arquivos por categoria e retorna a lista de nomes via XCom. O `.expand()` cria uma instância com nome da própria categoria. Cada instância lê somente seu arquivo e usa um dos dois slots de `ecommerce_pool`.
-3. **T07 · Fan-in.** A tarefa final confere se recebeu exatamente um resumo por categoria esperada. Usa `PostgresHook` e a conexão `pricing_postgres` para publicar snapshot e histórico na mesma transação. Uma falha durante a escrita preserva a publicação anterior. O bloqueio transacional por dia serializa publicações concorrentes daquela data.
+3. **T07 · Fan-in.** A tarefa final confere se recebeu exatamente um resumo por categoria esperada. Usa `PostgresHook` e a conexão `pricing_postgres` para publicar snapshot e histórico na mesma transação. Uma falha durante a escrita preserva a publicação anterior, e o Airflow faz até duas retentativas com espera exponencial. O bloqueio transacional por dia serializa publicações concorrentes daquela data.
 
 ### Contratos e tabelas
 
@@ -67,6 +68,12 @@ SELECT * FROM precos_historico ORDER BY data_execucao DESC, categoria;
 ```
 
 Para repetir uma execução com o mesmo catálogo, abra seu grafo, selecione `analise.descobrir_categorias` e use **Clear** incluindo as tarefas downstream. Repita duas vezes e compare as consultas. Use `make smoke` para automatizar o cenário, verificar o pico observado de concorrência e demonstrar a entrada de uma quarta categoria.
+
+### Operação em caso de falha
+
+A busca e a persistência têm limite de 90 segundos por tentativa. Se todas as tentativas falharem, a execução fica com status `failed` e o callback registra um alerta simulado nos logs. Depois de corrigir a causa, use **Clear** na tarefa que falhou e inclua as tarefas downstream para retomar a mesma execução.
+
+O agendamento depende do Docker e do scheduler ativos. O Compose usa um único host, e o alerta fica nos logs do Airflow. A política `catchup=False` evita gerar automaticamente todas as execuções perdidas durante uma interrupção.
 
 ## Explorar os dados no Jupyter
 

@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 
 
 def avisar_retry(context):
-    log.warning("Nova tentativa de ingestão agendada para %s", context["run_id"])
+    log.warning("Retentativa agendada em %s, execução %s", context["ti"].task_id, context["run_id"])
 
 
 def registrar_sucesso(context):
@@ -50,6 +50,7 @@ def pipeline():
             retries=3,
             retry_delay=timedelta(seconds=30),
             retry_exponential_backoff=True,
+            execution_timeout=timedelta(seconds=90),
             on_retry_callback=avisar_retry,
             on_success_callback=registrar_sucesso,
         )
@@ -75,7 +76,13 @@ def pipeline():
         def resumir_categoria(caminho: str, categoria: str) -> ResumoXCom:
             return calcular_metricas(categoria, precos_da_categoria(caminho, categoria)).para_xcom()
 
-        @task
+        @task(
+            retries=2,
+            retry_delay=timedelta(seconds=30),
+            retry_exponential_backoff=True,
+            execution_timeout=timedelta(seconds=90),
+            on_retry_callback=avisar_retry,
+        )
         def persistir(categorias: list[str], resumos: Sequence[ResumoXCom]) -> None:
             run = get_current_context()["dag_run"]
             referencia = pendulum.instance(run.logical_date or run.run_after).in_timezone(FUSO)
