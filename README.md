@@ -1,89 +1,87 @@
 # Pipeline de preços com Apache Airflow
 
-Todos os dias às **06h de Brasília**, a DAG `precos_por_categoria` coleta os produtos da FakeStore API e publica no PostgreSQL a quantidade e os preços médio, mínimo e máximo de cada categoria. Para acompanhar a atividade passo a passo, use o [checklist de tarefas](TASKS.md).
+A DAG `precos_por_categoria` consulta a FakeStore API todos os dias às **06h de Brasília**. Ela publica no PostgreSQL a quantidade de produtos e os preços médio, mínimo e máximo por categoria. O projeto usa Airflow 3.4, PostgreSQL 16, Python 3.12 e `uv` para reproduzir as dependências do desenvolvimento e das imagens Docker.
 
-## Primeira execução
+## Executar
 
-Na raiz do clone, com o Docker e o Docker Compose v2 instalados, execute os comandos abaixo no terminal da máquina.
-
-```sh
-docker compose up --build -d
-docker compose ps -a
-docker compose exec api cat /opt/airflow/simple_auth_manager_passwords.json.generated
-```
-
-Abra [o Airflow local](http://localhost:8080), entre como `admin` com a senha do último comando e selecione **precos_por_categoria**. O serviço `init` termina com código zero depois de migrar o banco e configurar o pool. A DAG começa ativa. Para coletar imediatamente, use **Trigger** na interface ou o comando abaixo. Aguarde o estado **success** e abra a visualização **Graph** da execução.
+Instale Docker, Docker Compose v2.24.4 ou superior e Make. Execute os comandos na raiz do clone.
 
 ```sh
-docker compose exec scheduler airflow dags trigger precos_por_categoria
+make up
+make password
+make trigger
 ```
 
-Para encerrar e retomar preservando preços, histórico e catálogos, use `docker compose down` e depois `docker compose up -d`. As credenciais do Compose são de desenvolvimento local. O PostgreSQL é acessível pela rede interna e a UI pela interface de loopback da máquina.
+Entre como `admin` com a senha gerada pelo Airflow. Abra `precos_por_categoria` e acompanhe a execução em **Graph**. O comando `make trigger` cria uma execução manual e retorna assim que ela for enfileirada. As portas da interface são locais e as credenciais são para desenvolvimento. [Airflow local](http://localhost:8080)
 
-## Desenvolver com VS Code e uv
+| Comando | Uso |
+|---|---|
+| `make status` | Ver os serviços. O serviço `init` termina com código zero após preparar banco, pool e permissões. |
+| `make logs` | Acompanhar API, scheduler e processador de DAGs. |
+| `make sql` | Abrir o PostgreSQL analítico. |
+| `make check` | Conferir o lockfile e rodar Ruff. |
+| `make test` | Rodar a suíte com tabelas temporárias em PostgreSQL. |
+| `make smoke` | Testar T06 e T07 com catálogo controlado, scheduler real e banco isolado. |
+| `make notebook` | Executar a análise do snapshot e do histórico. |
+| `make down` | Encerrar os serviços e conservar os dados nos volumes. |
 
-1. Abra a pasta do clone no VS Code com a extensão **Dev Containers** instalada. Pela paleta de comandos, escolha **Dev Containers: Reopen in Container**.
-2. No terminal integrado, execute os comandos abaixo. O workspace fica em `/workspace` e o interpretador em `/opt/venv/bin/python`.
+## Arquitetura da DAG
 
-   ```sh
-   uv run python --version
-   uv lock --check
-   uv run pytest -q
-   ```
-
-3. Edite a descrição ou uma tarefa em `dags/precos_por_categoria.py` e salve. O processador relê a pasta montada do clone. Confira a mudança na UI e verifique erros de importação com `docker compose exec dag-processor airflow dags list-import-errors` no terminal da máquina.
-4. Para acrescentar uma dependência, use `uv add pacote` ou `uv add --dev pacote`. Versione `pyproject.toml` e `uv.lock` juntos, reconstrua os serviços com `docker compose up --build --force-recreate -d` e use **Dev Containers: Rebuild Container** para atualizar o editor.
-
-O Dockerfile parte da imagem do Python 3.12, copia o binário de uv 0.8.17 e usa o mesmo lockfile nas imagens. O estágio `runtime` usa `uv sync --locked --no-dev`. O estágio `development` inclui Git e pytest. Para testar sem abrir o editor, use o terminal da máquina.
-
-```sh
-docker compose --profile dev build dev
-docker compose --profile dev run --rm dev uv run --locked pytest -q
+```mermaid
+flowchart LR
+    subgraph ingestao[Ingestão]
+        busca[Buscar produtos] --> valida[Validar produtos]
+    end
+    subgraph analise[Análise]
+        particao[Descobrir categorias e particionar] -->|"expand por categoria"| metrica["Calcular métricas · 2 slots"]
+        metrica -->|"um resumo por categoria"| publica[Consolidar e persistir]
+        particao -->|"categorias esperadas"| publica
+    end
+    valida --> particao
+    valida -->|"referência do catálogo"| metrica
+    publica --> pg[("PostgreSQL · pricing")]
+    pg --> notebook[Jupyter]
 ```
 
-O teste de persistência usa tabelas temporárias na conexão com o PostgreSQL. Ao rodar a suíte diretamente em um host sem `AIRFLOW_CONN_PRICING_POSTGRES`, o pytest indica esse teste como pulado.
+1. **Ingestão.** Consulta `GET /products` com timeout e grava o JSON de forma atômica no volume `catalogs`. O catálogo é identificado pela execução e pelo hash do conteúdo. O Airflow faz até três retentativas com espera exponencial. Os callbacks registram sucesso, retentativa e falha definitiva.
+2. **T06 · Fan-out.** `ValidarProdutosOperator` verifica o catálogo. A descoberta agrupa os preços em arquivos por categoria e retorna a lista de nomes via XCom. O `.expand()` cria uma instância com nome da própria categoria. Cada instância lê somente seu arquivo e usa um dos dois slots de `ecommerce_pool`.
+3. **T07 · Fan-in.** A tarefa final confere se recebeu exatamente um resumo por categoria esperada. Usa `PostgresHook` e a conexão `pricing_postgres` para publicar snapshot e histórico na mesma transação. Uma falha durante a escrita preserva a publicação anterior. O bloqueio transacional por dia serializa publicações concorrentes daquela data.
 
-## Como os dados percorrem a DAG
+### Contratos e tabelas
 
-| Grupo | Tarefa | Entrada e saída |
-|---|---|---|
-| Ingestão | `buscar_produtos` | Consulta `GET /products` com timeout. Grava o JSON por execução no volume `catalogs` e retorna o caminho via XCom. Em falha de coleta, o Airflow faz até três retentativas com espera exponencial. |
-| Ingestão | `validar_produtos` | O operador customizado exige catálogo não vazio, ID inteiro positivo e único, categoria preenchida e preço numérico finito e não negativo. Retorna a referência ao arquivo validado. |
-| Análise | `descobrir_categorias` | Extrai do arquivo a lista de categorias que alimenta o mapeamento dinâmico. |
-| Análise | `resumir_categoria` | `.expand()` cria uma instância por categoria. O pool `ecommerce_pool` permite duas em paralelo. Cada instância devolve apenas o resumo. A média usa `Decimal` e é arredondada para duas casas decimais, com meio centavo arredondado para cima. |
-| Análise | `persistir` | Espera todas as categorias e usa `PostgresHook` com a conexão `pricing_postgres` para publicar snapshot e histórico na mesma transação. |
+| Contrato | Granularidade e campos |
+|---|---|
+| `Produto` | Um produto da API, com ID inteiro positivo e único no catálogo, categoria normalizada e preço finito em `Decimal`. |
+| `ResumoCategoria` | Uma categoria, com quantidade e preços médio, mínimo e máximo. A média usa duas casas decimais com `ROUND_HALF_UP`. |
+| `ResumoXCom` | Representação JSON do resumo. Os valores decimais passam como texto e são reconstruídos antes da publicação. Os demais XComs carregam referências e nomes de categorias. |
+| `precos_diarios` | Uma linha por `(data_referencia, categoria)`, com os resultados da execução mais recente daquele dia. |
+| `precos_historico` | Uma linha por `(run_id, categoria)`. Novas execuções acrescentam observações. Repetir uma execução substitui apenas as próprias observações. |
 
-O PostgreSQL mantém os metadados do Airflow no banco `airflow` e as métricas no banco `pricing`. Cada dia tem um snapshot da última publicação para aquela data. Uma nova execução acrescenta um registro histórico por categoria. Ao repetir a mesma execução, a gravação substitui apenas o snapshot do dia e as linhas de histórico daquele `run_id`. A DAG processa uma execução de cada vez.
+A data de referência vem da data lógica convertida para `America/Sao_Paulo`. Disparos manuais sem data lógica usam o instante do disparo. A recência dentro de um dia usa o instante programado ou de disparo, gravado em `data_execucao`. Em empate, vence o maior `run_id` em ordem lexical. Reprocessar uma execução anterior atualiza seu histórico e preserva o snapshot da execução mais recente.
 
-A data de referência é a data lógica convertida para `America/Sao_Paulo`. Para disparos manuais sem data lógica, usa-se o instante do disparo. A UI pode exibir horários em UTC. **09h UTC corresponde a 06h de Brasília**. A FakeStore API disponibiliza o catálogo atual. Repetir apenas a análise usa o arquivo da execução. Repetir a busca captura novamente o conteúdo disponível na API.
-
-## Consultar e reprocessar
-
-No terminal da máquina, abra `docker compose exec postgres psql -U pricing -d pricing` e execute as consultas abaixo.
+Abra `make sql` e consulte os dois grãos.
 
 ```sql
 SELECT * FROM precos_diarios ORDER BY data_referencia DESC, categoria;
-SELECT run_id, data_execucao, categoria, quantidade, preco_medio
-FROM precos_historico ORDER BY data_execucao DESC, categoria;
+SELECT * FROM precos_historico ORDER BY data_execucao DESC, categoria;
 ```
 
-Para demonstrar idempotência, anote o `run_id` e os resultados. Na UI, abra **essa execução**, selecione `analise.persistir` e use **Clear** apenas nessa tarefa. Aguarde o sucesso e repita as consultas. O número de linhas e os valores devem coincidir nas duas tabelas. Para repetir a análise a partir do mesmo arquivo, selecione `ingestao.validar_produtos` e inclua as tarefas downstream.
+Para repetir uma execução com o mesmo catálogo, abra seu grafo, selecione `analise.descobrir_categorias` e use **Clear** incluindo as tarefas downstream. Repita duas vezes e compare as consultas. Use `make smoke` para automatizar o cenário, verificar o pico observado de concorrência e demonstrar a entrada de uma quarta categoria.
 
-## Demonstrar retries, validação e alerta
+## Explorar os dados no Jupyter
 
-O ensaio usa outro projeto Compose, outro banco e um servidor HTTP controlado. Requer Compose 2.24.4 ou superior pelo uso de `!override`. Depois do primeiro build, execute na raiz do repositório, em um terminal Bash ou Zsh da máquina.
+Execute `make notebook` após uma publicação bem-sucedida. O comando gera `.artifacts/precos.ipynb` com a tabela do snapshot, o gráfico de preços por categoria e a consulta aos últimos 30 dias. O histórico aparecerá em gráfico quando a categoria escolhida tiver pelo menos duas datas de referência.
 
-```sh
-ensaio() { docker compose -p pricing-falhas -f compose.yaml -f tests/compose.falhas.yaml "$@"; }
-ensaio up -d
-ensaio exec api cat /opt/airflow/simple_auth_manager_passwords.json.generated
-```
+Para editar e executar as células interativamente, abra o repositório no **VS Code → Dev Containers: Reopen in Container**. Se o Dev Container já existia antes desta revisão, use **Dev Containers: Rebuild Container**. Rode `uv sync --locked --group analytics` no contêiner, abra o notebook e selecione o kernel `/opt/venv/bin/python`. A conexão `PRICING_ANALYTICS_DSN` aponta para o banco analítico com um papel PostgreSQL de leitura. [Notebook de preços](analytics/precos.ipynb)
 
-Abra [o Airflow do ensaio](http://localhost:18080) e acompanhe a DAG. Se ainda não houver uma execução, use **Trigger**.
+## Organização do código
 
-1. **Recuperação.** O servidor começa respondendo 404. Quando a busca ficar `up_for_retry`, execute `ensaio exec catalogo-teste cp /amostras/valido.json /tmp/products`. O retry deve recuperar a execução. Consulte `ensaio exec postgres psql -U pricing -d pricing -c 'TABLE precos_diarios'`. A amostra tem três categorias. Para livros, aguarde quantidade 2, média 15,00, mínimo 10,00 e máximo 20,00.
-2. **Validação.** Execute `ensaio exec catalogo-teste cp /amostras/invalido.json /tmp/products` e dispare outra execução. O operador deve rejeitar o preço negativo. A tarefa de persistência ficará em `upstream_failed` e as métricas anteriores devem continuar disponíveis.
-3. **Falha definitiva.** Execute `ensaio exec catalogo-teste mv /tmp/products /tmp/products-indisponivel` e dispare uma nova execução. Mantenha a API indisponível por quatro tentativas. Nos logs de `ingestao.buscar_produtos`, confira a mensagem de nova tentativa e, na última, o alerta de falha definitiva.
-4. **Encerrar.** Use `ensaio down` para parar apenas o ensaio. Para recomeçá-lo com um banco novo, `ensaio down -v` remove seus volumes e dados de teste.
+- `dags/precos_por_categoria.py` define o grafo, o agendamento e os parâmetros do Airflow.
+- `dags/pricing_pipeline/` reúne contratos, coleta e particionamento, cálculo puro, operador de validação e persistência.
+- `docker/` prepara os bancos, papéis e pool. O PostgreSQL mantém metadados do Airflow em `airflow` e métricas em `pricing`.
+- `tests/` contém a suíte, o servidor de demonstração e os catálogos de teste. `scripts/smoke.sh` orquestra o ensaio de integração.
+- `analytics/` contém o notebook de consumo. O grupo `analytics` do `uv` é instalado sob demanda.
 
-Referências · [FakeStore API](https://fakestoreapi.com/docs) · [Apache Airflow](https://airflow.apache.org/docs/apache-airflow/3.4.0/) · [uv em Docker](https://docs.astral.sh/uv/guides/integration/docker/).
+Ao mudar dependências, versionar `pyproject.toml` e `uv.lock` juntos permite que as imagens e o Dev Container usem a mesma resolução. O Dockerfile fixa a versão de `uv` e usa `uv sync --locked --no-dev` na imagem de execução. Abra o [checklist com a revisão do enunciado](TASKS.md) para reproduzir os requisitos e os ensaios de falha.
+
+Referências · [FakeStore API](https://fakestoreapi.com/docs) · [Dynamic Task Mapping](https://airflow.apache.org/docs/apache-airflow/3.4.0/authoring-and-scheduling/dynamic-task-mapping.html) · [Bloqueios no PostgreSQL](https://www.postgresql.org/docs/16/explicit-locking.html) · [Execução de notebooks via nbconvert](https://nbconvert.readthedocs.io/en/latest/execute_api.html) · [uv em Docker](https://docs.astral.sh/uv/guides/integration/docker/)
