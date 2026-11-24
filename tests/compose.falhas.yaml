@@ -1,0 +1,16 @@
+# Combine com compose.yaml e use um nome de projeto próprio para isolar os dados.
+services:
+  catalogo-teste:
+    image: airflow-pricing:local
+    pull_policy: never
+    command: ["python", "-m", "http.server", "8000", "--directory", "/tmp"]
+    volumes:
+      - ./tests/amostras:/amostras:ro
+  scheduler:
+    environment:
+      FAKESTORE_PRODUCTS_URL: http://catalogo-teste:8000/products
+    depends_on:
+      catalogo-teste:
+        condition: service_started
+  api:
+    ports: !override ["127.0.0.1:18080:8080"]
