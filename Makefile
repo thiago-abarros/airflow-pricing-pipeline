@@ -5,7 +5,7 @@ DEMO := $(COMPOSE) -p pricing-falhas -f compose.yaml -f tests/compose.falhas.yam
 AIRFLOW_PASSWORD_FILE := /opt/airflow/shared/simple_auth_manager_passwords.json
 
 .DEFAULT_GOAL := help
-.PHONY: help airflow trigger status password sql check test notebook up down logs smoke smoke-falhas demo-up demo-down demo-ready demo-invalid demo-offline demo-trigger
+.PHONY: help airflow trigger status password sql check test notebook up down logs smoke smoke-falhas demo-up demo-down demo-airflow demo-sql demo-ready demo-invalid demo-offline demo-trigger
 
 help:
 	@printf '%s\n' 'make up        Sobe Airflow e PostgreSQL' 'make down      Para a pilha e mantém os volumes' \
@@ -17,6 +17,8 @@ help:
 	  'make smoke-falhas Exercita recuperação, rollback e alertas no Airflow' \
 	  'make notebook  Executa o notebook e grava o resultado em .artifacts' \
 	  'make demo-up   Sobe a pilha isolada para simular falhas' 'make demo-down Encerra a pilha de falhas' \
+	  'make demo-airflow Mostra os links e o login da pilha de demonstração' \
+	  'make demo-sql  Abre o banco analítico da demonstração' \
 	  'make demo-ready / demo-invalid / demo-offline Configura a resposta do catálogo de teste' \
 	  'make demo-trigger Dispara a DAG na pilha de demonstração'
 
@@ -87,9 +89,11 @@ up:
 	$(COMPOSE) build init
 	$(COMPOSE) up -d --wait api scheduler dag-processor
 
-airflow:
-	@endereco=$$($(COMPOSE) port api 8080) && \
-	  $(COMPOSE) exec -T api python - "$$endereco" "$(DAG)" < scripts/acesso_airflow.py
+airflow: ACESSO_COMPOSE := $(COMPOSE)
+demo-airflow: ACESSO_COMPOSE := $(DEMO)
+airflow demo-airflow:
+	@endereco=$$($(ACESSO_COMPOSE) port api 8080) && \
+	  $(ACESSO_COMPOSE) exec -T api python - "$$endereco" "$(DAG)" < scripts/acesso_airflow.py
 
 logs:
 	$(COMPOSE) logs -f api scheduler dag-processor
@@ -106,6 +110,9 @@ demo-up:
 
 demo-down:
 	$(DEMO) down
+
+demo-sql:
+	$(DEMO) exec postgres psql -U pricing -d pricing
 
 demo-ready:
 	$(DEMO) exec -T catalogo-teste cp /amostras/valido.json /tmp/products

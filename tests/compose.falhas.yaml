@@ -8,6 +8,7 @@ services:
       - ${PRICING_BIND_ROOT:-.}/tests/amostras:/amostras:ro
   scheduler:
     environment:
+      AIRFLOW__SCHEDULER__USE_JOB_SCHEDULE: "false"
       FAKESTORE_PRODUCTS_URL: http://catalogo-teste:8000/products
     depends_on:
       catalogo-teste:
