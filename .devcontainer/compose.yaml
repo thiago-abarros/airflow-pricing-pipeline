@@ -1,0 +1,4 @@
+services:
+  dev:
+    # O entrypoint da feature prepara o socket como root. O VS Code usa remoteUser.
+    user: root
