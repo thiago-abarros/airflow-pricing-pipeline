@@ -14,10 +14,16 @@ make trigger
 
 Use os links e as credenciais de `make airflow` para entrar na interface. Abra `precos_por_categoria` e acompanhe a execução em **Graph**. O comando `make trigger` cria uma execução manual e retorna assim que ela for enfileirada. As portas da interface são locais e as credenciais são para desenvolvimento.
 
+Para reproduzir a atividade requisito por requisito, siga o [roteiro de validação](TASKS.md). Ele inclui a inspeção da DAG, as consultas SQL, os resultados esperados e o passo a passo da demonstração de falhas.
+
 | Comando | Uso |
 |---|---|
+| `make` | Listar os alvos e os cenários disponíveis. |
+| `make up` | Preparar a imagem e aguardar os serviços principais. |
 | `make airflow` | Mostrar os links da interface e da DAG, o usuário e a senha local. |
+| `make password` | Mostrar apenas o arquivo de credenciais locais. |
 | `make status` | Ver os serviços. O serviço `init` termina com código zero após preparar banco, pool e permissões. |
+| `make trigger` | Enfileirar uma execução manual da DAG com a FakeStore API. |
 | `make logs` | Acompanhar API, scheduler e processador de DAGs. |
 | `make sql` | Abrir o PostgreSQL analítico. |
 | `make check` | Conferir o lockfile e rodar Ruff. |
@@ -25,11 +31,15 @@ Use os links e as credenciais de `make airflow` para entrar na interface. Abra `
 | `make smoke` | Testar T06 e T07 com catálogo controlado, scheduler real e banco isolado. |
 | `make smoke-falhas` | Exercitar recuperação da API, rejeição de catálogo, rollback no PostgreSQL e alerta após esgotar os retries. Pode levar vários minutos pelo backoff. |
 | `make notebook` | Executar a análise do snapshot e do histórico. |
+| `make demo-up` / `make demo-down` | Iniciar ou encerrar a pilha de demonstração. |
+| `make demo-airflow` / `make demo-sql` | Acessar a interface ou o banco analítico da demonstração. |
+| `make demo-trigger` | Disparar a DAG na demonstração. |
+| `make demo-ready` / `make demo-invalid` / `make demo-offline` | Servir a amostra válida, a inválida ou simular indisponibilidade. |
 | `make down` | Encerrar os serviços e conservar os dados nos volumes. |
 
 ### Usar Make no Dev Container
 
-A imagem de desenvolvimento inclui o Make e o cliente PostgreSQL. Ao abrir o repositório com **Dev Containers: Reopen in Container**, o VS Code também configura o cliente Docker para usar o daemon da máquina. Se o contêiner já estiver aberto, use **Dev Containers: Rebuild Container** para aplicar essa configuração. O acesso ao daemon fica no ambiente de desenvolvimento. [Docker no Dev Container](https://code.visualstudio.com/remote/advancedcontainers/use-docker-kubernetes)
+A imagem de desenvolvimento inclui o Make e o cliente PostgreSQL. Ao abrir o repositório com **Dev Containers: Reopen in Container**, o VS Code constrói a imagem de execução e configura o cliente Docker para usar o daemon da máquina. Se o contêiner já estiver aberto, use **Dev Containers: Rebuild Container** para aplicar essa configuração. A feature Docker está fixada em `.devcontainer/devcontainer-lock.json`. O acesso ao daemon fica no ambiente de desenvolvimento. [Docker no Dev Container](https://code.visualstudio.com/remote/advancedcontainers/use-docker-kubernetes)
 
 Digite `make` no terminal integrado para listar todos os alvos. `make smoke`, `make smoke-falhas` e `make demo-up` criam pilhas separadas. `make down` no terminal integrado para Airflow e PostgreSQL e mantém o terminal disponível para rodar `make up`. No terminal da máquina, `make down` encerra também o contêiner de desenvolvimento.
 
