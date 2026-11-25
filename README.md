@@ -8,14 +8,15 @@ Instale Docker, Docker Compose v2.24.4 ou superior e Make. Execute os comandos n
 
 ```sh
 make up
-make password
+make airflow
 make trigger
 ```
 
-Entre como `admin` com a senha gerada pelo Airflow. Abra `precos_por_categoria` e acompanhe a execução em **Graph**. O comando `make trigger` cria uma execução manual e retorna assim que ela for enfileirada. As portas da interface são locais e as credenciais são para desenvolvimento. [Airflow local](http://localhost:8080)
+Use os links e as credenciais de `make airflow` para entrar na interface. Abra `precos_por_categoria` e acompanhe a execução em **Graph**. O comando `make trigger` cria uma execução manual e retorna assim que ela for enfileirada. As portas da interface são locais e as credenciais são para desenvolvimento.
 
 | Comando | Uso |
 |---|---|
+| `make airflow` | Mostrar os links da interface e da DAG, o usuário e a senha local. |
 | `make status` | Ver os serviços. O serviço `init` termina com código zero após preparar banco, pool e permissões. |
 | `make logs` | Acompanhar API, scheduler e processador de DAGs. |
 | `make sql` | Abrir o PostgreSQL analítico. |

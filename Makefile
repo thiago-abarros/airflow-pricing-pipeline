@@ -5,10 +5,11 @@ DEMO := $(COMPOSE) -p pricing-falhas -f compose.yaml -f tests/compose.falhas.yam
 AIRFLOW_PASSWORD_FILE := /opt/airflow/shared/simple_auth_manager_passwords.json
 
 .DEFAULT_GOAL := help
-.PHONY: help trigger status password sql check test notebook up down logs smoke smoke-falhas demo-up demo-down demo-ready demo-invalid demo-offline demo-trigger
+.PHONY: help airflow trigger status password sql check test notebook up down logs smoke smoke-falhas demo-up demo-down demo-ready demo-invalid demo-offline demo-trigger
 
 help:
 	@printf '%s\n' 'make up        Sobe Airflow e PostgreSQL' 'make down      Para a pilha e mantém os volumes' \
+	  'make airflow   Mostra os links e o login local do Airflow' \
 	  'make status    Mostra a saúde do Airflow ou os serviços do Compose' 'make logs      Acompanha os logs do Airflow' \
 	  'make password  Mostra a senha local do admin' 'make trigger   Dispara a DAG' \
 	  'make sql       Abre o PostgreSQL analítico' 'make check     Verifica lockfile e lint' \
@@ -85,6 +86,10 @@ endif
 up:
 	$(COMPOSE) build init
 	$(COMPOSE) up -d --wait api scheduler dag-processor
+
+airflow:
+	@endereco=$$($(COMPOSE) port api 8080) && \
+	  $(COMPOSE) exec -T api python - "$$endereco" "$(DAG)" < scripts/acesso_airflow.py
 
 logs:
 	$(COMPOSE) logs -f api scheduler dag-processor
